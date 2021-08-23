@@ -24,20 +24,32 @@ def connect(hostname, username, password):
     return client
 
 
+def positive_int(value):
+    int_value = int(value)
+    if int_value <= 0:
+        raise argparse.ArgumentTypeError(f'{value} is not a positive int')
+    return int_value
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', action='append',
                         help='Query configuration files')
+    parser.add_argument('-d', '--disable-session', action='store_true',
+                        help='Disable session metrics')
     parser.add_argument('-s', '--host', default='localhost')
     parser.add_argument('-u', '--user', default='guest')
     parser.add_argument('-w', '--password', default='guest')
     parser.add_argument('-l', '--listen', type=int, default=9449,
                         help='Serve metrics on this port')
-    parser.add_argument('-i', '--interval', type=int, default=60,
+    parser.add_argument('-i', '--interval', type=positive_int, default=60,
                         help='Interval (seconds) between updates, default 60')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Print verbose output')
     args = parser.parse_args()
+
+    if not args.config and args.disable_session:
+        parser.error('Either config or session metrics must be enabled')
 
     g_last_login = Gauge('omero_prometheus_tools_agent_login_time',
                          'Time of last Prometheus agent login')
@@ -53,14 +65,18 @@ if __name__ == '__main__':
             counts = CountMetrics(client, args.config, args.verbose)
         else:
             counts = None
-        sessions = SessionMetrics(client, verbose=args.verbose)
+        if args.disable_session:
+            sessions = None
+        else:
+            sessions = SessionMetrics(client, verbose=args.verbose)
         while True:
             starttm = time()
-            sessions.update()
+            if sessions:
+                sessions.update()
             if counts:
                 counts.update()
             endtm = time()
-            # HQL queries may take a long time
-            sleep(max(args.interval + endtm - starttm, 0))
+            # Sleep for given interval before updating
+            sleep(args.interval)
     finally:
         client.closeSession()
