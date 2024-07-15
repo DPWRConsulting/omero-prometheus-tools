@@ -1,4 +1,4 @@
-FROM continuumio/miniconda3:24.5.0-0 as builder
+FROM continuumio/miniconda3:24.5.0-0 AS builder
 
 USER root
 
