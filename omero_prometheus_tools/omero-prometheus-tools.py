@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 
 import argparse
+import sys
 import omero.clients
+import Ice
 
 from prometheus_client import (
     Gauge,
     start_http_server,
 )
-from time import (
-    sleep,
-    time,
-)
+from time import sleep
 from omero_prometheus_tools import (
     CountMetrics,
     SessionMetrics,
@@ -21,7 +20,20 @@ def connect(hostname, username, password):
     client = omero.client(hostname)
     client.setAgent('prometheus-omero-tools')
     client.createSession(username, password)
+    # Ping the server periodically so the session and connection are not
+    # dropped as idle when the update interval is long (e.g. 3600s)
+    client.enableKeepAlive(KEEPALIVE_SECONDS)
     return client
+
+
+def close_quietly(client):
+    try:
+        client.closeSession()
+    except Exception:
+        pass
+
+
+KEEPALIVE_SECONDS = 60
 
 
 def positive_int(value):
@@ -70,13 +82,27 @@ if __name__ == '__main__':
         else:
             sessions = SessionMetrics(client, verbose=args.verbose)
         while True:
-            starttm = time()
-            if sessions:
-                sessions.update()
-            if counts:
-                counts.update()
-            endtm = time()
+            try:
+                if sessions:
+                    sessions.update()
+                if counts:
+                    counts.update()
+            except Ice.Exception as e:
+                # Connection or session lost: log in again and retry once.
+                # A second failure (or a failed login) propagates and exits.
+                print(f'Update failed ({type(e).__name__}), reconnecting',
+                      file=sys.stderr, flush=True)
+                close_quietly(client)
+                client = connect(args.host, args.user, args.password)
+                g_last_login.set_to_current_time()
+                for m in (sessions, counts):
+                    if m:
+                        m.client = client
+                if sessions:
+                    sessions.update()
+                if counts:
+                    counts.update()
             # Sleep for given interval before updating
             sleep(args.interval)
     finally:
-        client.closeSession()
+        close_quietly(client)
