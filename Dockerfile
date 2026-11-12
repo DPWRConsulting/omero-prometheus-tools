@@ -13,4 +13,6 @@ RUN /opt/conda/bin/conda create --name penv -c conda-forge python=3.10
 RUN /opt/conda/bin/conda install -n penv -y -q -c conda-forge pip omero-py nomkl 
 COPY --from=builder /omero-prometheus-tools/dist/*.whl .
 RUN /opt/conda/bin/conda run -n penv pip install *.whl
-ENTRYPOINT [ "/opt/conda/bin/conda", "run", "-n", "penv", "/opt/conda/envs/penv/bin/omero-prometheus-tools.py" ]
+# Run the env's python directly: "conda run" echoes the full command line,
+# including the password argument, to the logs whenever the script fails
+ENTRYPOINT [ "/opt/conda/envs/penv/bin/python", "/opt/conda/envs/penv/bin/omero-prometheus-tools.py" ]
